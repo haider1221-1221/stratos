@@ -1,9 +1,9 @@
-const defaultOrigin = 'http://127.0.0.1:8000'
+const defaultOrigin = window.location.origin
 
 function getApiOrigin() {
   try {
     if (typeof window !== 'undefined' && window.__API_ORIGIN) return window.__API_ORIGIN
-  } catch (e) {}
+  } catch (e) { }
   return process.env.REACT_APP_BACKEND_URL || defaultOrigin
 }
 
