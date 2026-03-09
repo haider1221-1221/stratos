@@ -45,15 +45,21 @@ if not default_frontend_path.exists():
 
 FRONTEND_BUILD_DIR = Path(os.environ.get('FRONTEND_BUILD_DIR', default_frontend_path))
 
-# Configure logging to file for production debugging
-log_file = ROOT_DIR / "stratos_backend.log"
+# Configure logging
+handlers = [logging.StreamHandler()]
+
+# Only use FileHandler if NOT on Vercel (where the filesystem is read-only)
+if not os.environ.get('VERCEL'):
+    log_file = ROOT_DIR / "stratos_backend.log"
+    try:
+        handlers.append(logging.FileHandler(log_file))
+    except Exception:
+        pass
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler()
-    ]
+    handlers=handlers
 )
 logger = logging.getLogger(__name__)
 logger.info(f"Frontend build directory: {FRONTEND_BUILD_DIR}")
