@@ -4,7 +4,16 @@ import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import { API_URL } from '../lib/api';
 import { toast } from 'sonner';
-import { Globe, ArrowLeft, ChevronRight, Check, BookOpen } from 'lucide-react';
+import { Globe, ArrowLeft, ChevronRight, Check, BookOpen, Flame, Star, Briefcase } from 'lucide-react';
+
+const LANGUAGE_TAGS = {
+  es: { label: '🔥 Popular', color: 'bg-orange-100 text-orange-600' },
+  fr: { label: '⭐ Beginner Friendly', color: 'bg-blue-100 text-blue-600' },
+  ja: { label: '💼 Business', color: 'bg-purple-100 text-purple-600' },
+  de: { label: '⭐ Beginner Friendly', color: 'bg-blue-100 text-blue-600' },
+  zh: { label: '🔥 Popular', color: 'bg-orange-100 text-orange-600' },
+  pt: { label: '🔥 Popular', color: 'bg-orange-100 text-orange-600' },
+};
 
 const LanguageSelect = () => {
   const { user, refreshUser } = useAuth();
@@ -12,6 +21,7 @@ const LanguageSelect = () => {
   const [languages, setLanguages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selecting, setSelecting] = useState(null);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     const fetchLanguages = async () => {
@@ -46,6 +56,85 @@ const LanguageSelect = () => {
 
   const isLearning = (code) => user?.languages_learning?.includes(code);
 
+  const learningLanguages = Array.isArray(languages)
+    ? languages.filter(l => isLearning(l.code))
+    : [];
+  const otherLanguages = Array.isArray(languages)
+    ? languages.filter(l => !isLearning(l.code))
+    : [];
+
+  const visibleOthers = showAll ? otherLanguages : otherLanguages.slice(0, 6);
+
+  const LanguageCard = ({ lang }) => {
+    const learning = isLearning(lang.code);
+    const tag = LANGUAGE_TAGS[lang.code];
+    return (
+      <button
+        key={lang.code}
+        onClick={() => handleSelectLanguage(lang.code)}
+        disabled={selecting !== null}
+        className={`relative overflow-hidden group text-left p-6 rounded-3xl border-2 transition-all cursor-pointer hover:shadow-lg hover:-translate-y-1 ${learning
+            ? 'border-sky-300 bg-sky-50 ring-2 ring-sky-200 ring-offset-1'
+            : 'border-slate-200 bg-white hover:border-sky-300'
+          }`}
+        data-testid={`select-language-${lang.code}`}
+      >
+        {/* Selected checkmark — top right, strong contrast */}
+        {learning && (
+          <div className="absolute top-3 right-3 w-7 h-7 bg-sky-500 rounded-full flex items-center justify-center shadow-md">
+            <Check className="w-4 h-4 text-white" strokeWidth={3} />
+          </div>
+        )}
+
+        {/* Tag */}
+        {tag && (
+          <div className={`inline-flex items-center text-xs font-bold px-2 py-0.5 rounded-full mb-3 ${tag.color}`}>
+            {tag.label}
+          </div>
+        )}
+
+        <div className="flex items-center gap-4 mb-4">
+          <span className="text-5xl group-hover:scale-110 transition-transform">{lang.flag}</span>
+          <div>
+            <h3 className="font-heading font-bold text-xl text-slate-800">{lang.name}</h3>
+            <p className="text-slate-500 text-sm">{lang.lessons_count} lessons</p>
+          </div>
+        </div>
+
+        {learning && lang.progress > 0 && (
+          <div className="space-y-1 mb-3">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-500">Progress</span>
+              <span className="font-bold text-sky-600">{lang.progress}%</span>
+            </div>
+            <div className="h-2 bg-sky-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-sky-400 to-indigo-500 rounded-full transition-all"
+                style={{ width: `${lang.progress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {selecting === lang.code && (
+          <div className="absolute inset-0 bg-white/80 flex items-center justify-center rounded-3xl">
+            <div className="animate-spin w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full" />
+          </div>
+        )}
+
+        <div className="mt-3 flex items-center justify-between">
+          <span className={`font-bold text-sm px-4 py-2 rounded-xl ${learning
+              ? 'bg-sky-500 text-white'
+              : 'bg-slate-100 text-slate-600 group-hover:bg-sky-500 group-hover:text-white transition-colors'
+            }`}>
+            {learning ? 'Resume' : 'Start'}
+          </span>
+          <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-sky-500 group-hover:translate-x-1 transition-all" />
+        </div>
+      </button>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-slate-100 sticky top-0 z-50">
@@ -62,10 +151,10 @@ const LanguageSelect = () => {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-12">
-        <div className="text-center mb-12">
-          <h1 className="font-heading font-extrabold text-4xl text-slate-800 mb-4">What do you want to learn?</h1>
-          <p className="text-xl text-slate-500">Choose a language and start your journey to fluency</p>
+      <main className="max-w-5xl mx-auto px-6 py-10">
+        <div className="text-center mb-10">
+          <h1 className="font-heading font-extrabold text-3xl text-slate-800 mb-2">What do you want to learn?</h1>
+          <p className="text-slate-500">Choose a language and start your journey to fluency</p>
         </div>
 
         {loading ? (
@@ -73,63 +162,48 @@ const LanguageSelect = () => {
             <div className="animate-spin w-12 h-12 border-4 border-sky-500 border-t-transparent rounded-full"></div>
           </div>
         ) : (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {Array.isArray(languages)
-              ? languages.map((lang) => (
+          <div className="space-y-8">
+            {/* Section: Continue Learning */}
+            {learningLanguages.length > 0 && (
+              <section>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-1 h-5 bg-sky-500 rounded-full" />
+                  <h2 className="font-heading font-bold text-base text-slate-700 uppercase tracking-wide">Continue Learning</h2>
+                </div>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {learningLanguages.map(lang => <LanguageCard key={lang.code} lang={lang} />)}
+                </div>
+              </section>
+            )}
+
+            {/* Section: All Languages (or Recommended) */}
+            <section>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-1 h-5 bg-indigo-500 rounded-full" />
+                <h2 className="font-heading font-bold text-base text-slate-700 uppercase tracking-wide">
+                  {learningLanguages.length > 0 ? 'All Languages' : 'Recommended'}
+                </h2>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {visibleOthers.map(lang => <LanguageCard key={lang.code} lang={lang} />)}
+              </div>
+
+              {/* Show More / Less toggle */}
+              {otherLanguages.length > 6 && (
+                <div className="mt-5 text-center">
                   <button
-                    key={lang.code}
-                    onClick={() => handleSelectLanguage(lang.code)}
-                    disabled={selecting !== null}
-                    className={`stratos-card-interactive p-6 text-left relative overflow-hidden group ${
-                      isLearning(lang.code) ? 'ring-2 ring-sky-400' : ''
-                    }`}
-                    data-testid={`select-language-${lang.code}`}>
-                    {isLearning(lang.code) && (
-                      <div className="absolute top-3 right-3 w-6 h-6 bg-sky-500 rounded-full flex items-center justify-center">
-                        <Check className="w-4 h-4 text-white" />
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-4 mb-4">
-                      <span className="text-6xl group-hover:scale-110 transition-transform">{lang.flag}</span>
-                      <div>
-                        <h3 className="font-heading font-bold text-xl text-slate-800">{lang.name}</h3>
-                        <p className="text-slate-500">{lang.lessons_count} lessons</p>
-                      </div>
-                    </div>
-
-                    {isLearning(lang.code) && lang.progress > 0 && (
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-slate-500">Progress</span>
-                          <span className="font-medium text-slate-700">{lang.progress}%</span>
-                        </div>
-                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-sky-400 to-sky-500 rounded-full"
-                            style={{ width: `${lang.progress}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {selecting === lang.code && (
-                      <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
-                        <div className="animate-spin w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full" />
-                      </div>
-                    )}
-
-                    <div className="mt-4 flex items-center justify-between text-sky-600 font-semibold">
-                      <span>{isLearning(lang.code) ? 'Continue' : 'Start Learning'}</span>
-                      <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                    </div>
+                    onClick={() => setShowAll(v => !v)}
+                    className="stratos-btn-secondary text-sm px-6 py-2.5"
+                  >
+                    {showAll ? 'Show Less ▲' : `View All (${otherLanguages.length}) ▼`}
                   </button>
-                ))
-              : null}
+                </div>
+              )}
+            </section>
           </div>
         )}
 
-        <div className="mt-12 stratos-card bg-gradient-to-br from-indigo-50 to-sky-50 border-indigo-200">
+        <div className="mt-10 stratos-card bg-gradient-to-br from-indigo-50 to-sky-50 border-indigo-200">
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center flex-shrink-0">
               <BookOpen className="w-6 h-6 text-indigo-600" />

@@ -15,7 +15,7 @@ const SignupPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!name || !email || !password) {
       toast.error('Please fill in all fields');
       return;
@@ -46,7 +46,7 @@ const SignupPage = () => {
           <h2 className="font-heading font-extrabold text-4xl text-white mb-6">
             Start Your Journey Today
           </h2>
-          
+
           <div className="space-y-4">
             {[
               'Learn 10+ languages for free',
@@ -63,8 +63,8 @@ const SignupPage = () => {
               </div>
             ))}
           </div>
-          
-          <img 
+
+          <img
             src="https://images.unsplash.com/photo-1634096996263-164e157c9099?w=500&h=300&fit=crop"
             alt="Diverse community"
             className="rounded-3xl shadow-2xl mt-8"
@@ -76,8 +76,8 @@ const SignupPage = () => {
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-md">
           {/* Back button */}
-          <Link 
-            to="/" 
+          <Link
+            to="/"
             className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-700 mb-8 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -173,8 +173,8 @@ const SignupPage = () => {
 
           <p className="text-center mt-8 text-slate-500">
             Already have an account?{' '}
-            <Link 
-              to="/login" 
+            <Link
+              to="/login"
               className="text-sky-600 font-semibold hover:text-sky-700 transition-colors"
               data-testid="signup-login-link"
             >

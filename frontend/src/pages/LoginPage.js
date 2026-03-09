@@ -14,7 +14,7 @@ const LoginPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!email || !password) {
       toast.error('Please fill in all fields');
       return;
@@ -38,8 +38,8 @@ const LoginPage = () => {
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-md">
           {/* Back button */}
-          <Link 
-            to="/" 
+          <Link
+            to="/"
             className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-700 mb-8 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -120,8 +120,8 @@ const LoginPage = () => {
 
           <p className="text-center mt-8 text-slate-500">
             Don't have an account?{' '}
-            <Link 
-              to="/signup" 
+            <Link
+              to="/signup"
               className="text-sky-600 font-semibold hover:text-sky-700 transition-colors"
               data-testid="login-signup-link"
             >
@@ -134,7 +134,7 @@ const LoginPage = () => {
       {/* Right side - Image */}
       <div className="hidden lg:flex flex-1 bg-gradient-to-br from-sky-400 to-indigo-500 items-center justify-center p-12">
         <div className="max-w-lg text-center">
-          <img 
+          <img
             src="https://images.unsplash.com/photo-1713811978849-414ce73e4d3c?w=500&h=400&fit=crop"
             alt="Happy learner"
             className="rounded-3xl shadow-2xl mb-8"

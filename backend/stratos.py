@@ -13,9 +13,24 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional, Union, Any
 import uuid
+import re
 from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
+
+import unicodedata
+
+def normalize_answer(s: str) -> str:
+    if not s:
+        return ""
+    s = s.lower()
+    # Strip diacritics/accents
+    s = unicodedata.normalize('NFD', s)
+    s = ''.join(c for c in s if unicodedata.category(c) != 'Mn')
+    # Remove punctuation
+    s = re.sub(r'[.,\/#!$%\^\&\*;:{}=\-_`~()\'\"\[\]]', '', s)
+    # Remove all whitespace
+    return re.sub(r'\s+', '', s).strip()
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -112,11 +127,37 @@ class UserResponse(BaseModel):
     level: int = 1
     streak: int = 0
     hearts: int = 5
+    gems: int = 0
+    league: str = "Bronze"
+    inventory: List[str] = []
+    friends: List[str] = []
+    friend_requests: List[str] = []
+    active_boosters: List[dict] = [] # e.g. [{"id": "xp-double", "uses_left": 3}]
     current_language: Optional[str] = None
     languages_learning: List[str] = []
     achievements: List[str] = []
     last_practice_date: Optional[str] = None
     created_at: str
+
+class ShopItem(BaseModel):
+    id: str
+    name: str
+    description: str
+    cost: int
+    icon: str
+
+class GemPackage(BaseModel):
+    id: str
+    name: str
+    amount: int
+    price: float
+    icon: str
+
+class FriendRequest(BaseModel):
+    id: str
+    name: str
+    level: int
+    avatar_url: Optional[str] = None
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -156,6 +197,7 @@ class LessonProgress(BaseModel):
 class QuizSubmission(BaseModel):
     lesson_id: str
     answers: List[str]
+    session_token: Optional[str] = None
 
 class QuizResult(BaseModel):
     correct: int
@@ -169,7 +211,9 @@ class FlashcardSet(BaseModel):
     id: str
     language: str
     title: str
+    order: int
     cards: List[dict]
+    locked: bool = True
 
 class Achievement(BaseModel):
     id: str
@@ -186,6 +230,7 @@ class LeaderboardEntry(BaseModel):
     xp: int
     level: int
     streak: int
+    league: str = "Bronze"
 
 # ============ AUTH HELPERS ============
 
@@ -232,272 +277,289 @@ LANGUAGES = [
     {"code": "ar", "name": "Arabic", "flag": "🇸🇦"},
 ]
 
-SAMPLE_LESSONS = {
-    "es": [
-        {
-            "id": "es-basics-1",
-            "language": "es",
-            "title": "Greetings",
-            "description": "Learn basic Spanish greetings",
-            "order": 1,
-            "xp_reward": 15,
-            "content": [
-                {"type": "voice", "question": "Listen and repeat: Hola", "correct_answer": "hola", "voice_url": "/audio/es/hola.mp3", "hint": "Hello"},
-                {"type": "multiple_choice", "question": "What does 'Buenos días' mean?", "options": ["Good night", "Good morning", "Goodbye", "Thank you"], "correct_answer": "Good morning"},
-                {"type": "written", "question": "Write 'Thank you' in Spanish", "correct_answer": "gracias", "hint": "Starts with 'gra'"},
-                {"type": "multiple_choice", "question": "How do you say 'Goodbye' in Spanish?", "options": ["Hola", "Gracias", "Adiós", "Por favor"], "correct_answer": "Adiós"},
-            ]
-        },
-        {
-            "id": "es-basics-2",
-            "language": "es",
-            "title": "Numbers",
-            "description": "Count from 1 to 10 in Spanish",
-            "order": 2,
-            "xp_reward": 15,
-            "content": [
-                {"type": "voice", "question": "Listen and repeat: Uno, Dos, Tres", "correct_answer": "uno dos tres", "voice_url": "/audio/es/numbers.mp3"},
-                {"type": "multiple_choice", "question": "What is 'Cinco' in English?", "options": ["Three", "Four", "Five", "Six"], "correct_answer": "Five"},
-                {"type": "written", "question": "Write the number 7 in Spanish", "correct_answer": "siete", "hint": "Starts with 'si'"},
-                {"type": "multiple_choice", "question": "What comes after 'ocho'?", "options": ["Siete", "Nueve", "Diez", "Seis"], "correct_answer": "Nueve"},
-            ]
-        },
-        {
-            "id": "es-basics-3",
-            "language": "es",
-            "title": "Colors",
-            "description": "Learn colors in Spanish",
-            "order": 3,
-            "xp_reward": 20,
-            "content": [
-                {"type": "voice", "question": "Listen: Rojo means Red", "correct_answer": "rojo", "voice_url": "/audio/es/rojo.mp3"},
-                {"type": "multiple_choice", "question": "What color is 'Azul'?", "options": ["Red", "Green", "Blue", "Yellow"], "correct_answer": "Blue"},
-                {"type": "written", "question": "Write 'Green' in Spanish", "correct_answer": "verde", "hint": "Starts with 'ver'"},
-                {"type": "multiple_choice", "question": "'Amarillo' is which color?", "options": ["Black", "White", "Yellow", "Orange"], "correct_answer": "Yellow"},
-            ]
-        },
-    ],
-    "fr": [
-        {
-            "id": "fr-basics-1",
-            "language": "fr",
-            "title": "Salutations",
-            "description": "Learn French greetings",
-            "order": 1,
-            "xp_reward": 15,
-            "content": [
-                {"type": "voice", "question": "Listen and repeat: Bonjour", "correct_answer": "bonjour", "voice_url": "/audio/fr/bonjour.mp3", "hint": "Hello/Good day"},
-                {"type": "multiple_choice", "question": "What does 'Merci' mean?", "options": ["Hello", "Goodbye", "Thank you", "Please"], "correct_answer": "Thank you"},
-                {"type": "written", "question": "Write 'Goodbye' in French", "correct_answer": "au revoir", "hint": "Two words"},
-                {"type": "multiple_choice", "question": "How do you say 'Please' in French?", "options": ["Merci", "S'il vous plaît", "Bonjour", "Pardon"], "correct_answer": "S'il vous plaît"},
-            ]
-        },
-    ],
-    "de": [
-        {
-            "id": "de-basics-1",
-            "language": "de",
-            "title": "Begrüßungen",
-            "description": "Learn German greetings",
-            "order": 1,
-            "xp_reward": 15,
-            "content": [
-                {"type": "voice", "question": "Listen and repeat: Guten Tag", "correct_answer": "guten tag", "voice_url": "/audio/de/guten-tag.mp3"},
-                {"type": "multiple_choice", "question": "What does 'Danke' mean?", "options": ["Hello", "Goodbye", "Thank you", "Please"], "correct_answer": "Thank you"},
-                {"type": "written", "question": "Write 'Goodbye' in German", "correct_answer": "auf wiedersehen", "hint": "Means 'until we see again'"},
-                {"type": "multiple_choice", "question": "How do you say 'Good morning'?", "options": ["Guten Abend", "Guten Morgen", "Gute Nacht", "Guten Tag"], "correct_answer": "Guten Morgen"},
-            ]
-        },
-    ],
-    "ja": [
-        {
-            "id": "ja-basics-1",
-            "language": "ja",
-            "title": "あいさつ (Greetings)",
-            "description": "Learn Japanese greetings",
-            "order": 1,
-            "xp_reward": 15,
-            "content": [
-                {"type": "voice", "question": "Listen and repeat: こんにちは (Konnichiwa)", "correct_answer": "konnichiwa", "voice_url": "/audio/ja/konnichiwa.mp3"},
-                {"type": "multiple_choice", "question": "What does 'ありがとう' mean?", "options": ["Hello", "Goodbye", "Thank you", "Please"], "correct_answer": "Thank you"},
-                {"type": "written", "question": "Write 'Hello' in romaji", "correct_answer": "konnichiwa", "hint": "Starts with 'kon'"},
-                {"type": "multiple_choice", "question": "How do you say 'Goodbye'?", "options": ["Ohayou", "Sayounara", "Arigatou", "Sumimasen"], "correct_answer": "Sayounara"},
-            ]
-        },
-    ],
-}
+# All lessons are generated from the pool builders below.
+SAMPLE_LESSONS = {}
 
 # Ensure every language has at least 4 meaningful sample lessons (generate greetings, numbers, colors, phrases)
 common_phrases = {
     'es': {
         'hello': 'hola', 'thank': 'gracias', 'goodbye': 'adiós', 'please': 'por favor',
+        'yes': 'sí', 'no': 'no', 'sorry': 'lo siento', 'excuse': 'perdón',
         'numbers': ['uno','dos','tres','cuatro','cinco','seis','siete','ocho','nueve','diez'],
         'colors': ['rojo','azul','verde','amarillo','negro','blanco','naranja','morado'],
         'family': {'father': 'padre', 'mother': 'madre', 'brother': 'hermano', 'sister': 'hermana'},
-        'travel': {'airport': 'aeropuerto', 'hotel': 'hotel', 'ticket': 'boleto', 'map': 'mapa'}
+        'travel': {'airport': 'aeropuerto', 'hotel': 'hotel', 'ticket': 'boleto', 'map': 'mapa'},
+        'food': {'bread': 'pan', 'milk': 'leche', 'water': 'agua', 'apple': 'manzana'},
+        'time': {'today': 'hoy', 'tomorrow': 'mañana', 'now': 'ahora', 'later': 'más tarde'}
     },
     'fr': {
         'hello': 'bonjour', 'thank': 'merci', 'goodbye': 'au revoir', 'please': "s'il vous plaît",
+        'yes': 'oui', 'no': 'non', 'sorry': 'pardon', 'excuse': 'excusez-moi',
         'numbers': ['un','deux','trois','quatre','cinq','six','sept','huit','neuf','dix'],
         'colors': ['rouge','bleu','vert','jaune','noir','blanc','orange','violet'],
         'family': {'father': 'père', 'mother': 'mère', 'brother': 'frère', 'sister': 'sœur'},
-        'travel': {'airport': 'aéroport', 'hotel': 'hôtel', 'ticket': 'billet', 'map': 'carte'}
+        'travel': {'airport': 'aéroport', 'hotel': 'hôtel', 'ticket': 'billet', 'map': 'carte'},
+        'food': {'bread': 'pain', 'milk': 'lait', 'water': 'eau', 'apple': 'pomme'},
+        'time': {'today': "aujourd'hui", 'tomorrow': 'demain', 'now': 'maintenant', 'later': 'plus tard'}
     },
     'de': {
         'hello': 'hallo', 'thank': 'danke', 'goodbye': 'auf wiedersehen', 'please': 'bitte',
+        'yes': 'ja', 'no': 'nein', 'sorry': 'tut mir leid', 'excuse': 'entschuldigung',
         'numbers': ['eins','zwei','drei','vier','fünf','sechs','sieben','acht','neun','zehn'],
         'colors': ['rot','blau','grün','gelb','schwarz','weiß','orange','lila'],
         'family': {'father': 'vater', 'mother': 'mutter', 'brother': 'bruder', 'sister': 'schwester'},
-        'travel': {'airport': 'flughafen', 'hotel': 'hotel', 'ticket': 'ticket', 'map': 'karte'}
+        'travel': {'airport': 'flughafen', 'hotel': 'hotel', 'ticket': 'ticket', 'map': 'karte'},
+        'food': {'bread': 'brot', 'milk': 'milch', 'water': 'wasser', 'apple': 'apfel'},
+        'time': {'today': 'heute', 'tomorrow': 'morgen', 'now': 'jetzt', 'later': 'später'}
     },
     'ja': {
         'hello': 'konnichiwa', 'thank': 'arigatou', 'goodbye': 'sayounara', 'please': 'onegaishimasu',
+        'yes': 'hai', 'no': 'iie', 'sorry': 'gomennasai', 'excuse': 'sumimasen',
         'numbers': ['ichi','ni','san','shi','go','roku','shichi','hachi','kyuu','juu'],
         'colors': ['aka','ao','midori','ki','kuro','shiro','daidai','murasaki'],
         'family': {'father': 'otousan', 'mother': 'okaasan', 'brother': 'oniisan', 'sister': 'oneesan'},
-        'travel': {'airport': 'kuukou', 'hotel': 'hoteru', 'ticket': 'kippu', 'map': 'chizu'}
+        'travel': {'airport': 'kuukou', 'hotel': 'hoteru', 'ticket': 'kippu', 'map': 'chizu'},
+        'food': {'bread': 'pan', 'milk': 'miruku', 'water': 'mizu', 'apple': 'ringo'},
+        'time': {'today': 'kyou', 'tomorrow': 'ashita', 'now': 'ima', 'later': 'ato de'}
     },
     'zh': {
         'hello': 'nǐ hǎo', 'thank': 'xièxie', 'goodbye': 'zàijiàn', 'please': 'qǐng',
+        'yes': 'shì', 'no': 'bù', 'sorry': 'duìbuqǐ', 'excuse': 'qǐngwèn',
         'numbers': ['yi','er','san','si','wu','liu','qi','ba','jiu','shi'],
         'colors': ['hóng','lán','lǜ','huáng','hēi','bái','chéng','zǐ'],
         'family': {'father': 'bàba', 'mother': 'māmā', 'brother': 'gēgē', 'sister': 'jiějiě'},
-        'travel': {'airport': 'jīchǎng', 'hotel': 'jiǔdiàn', 'ticket': 'piào', 'map': 'dìtú'}
+        'travel': {'airport': 'jīchǎng', 'hotel': 'jiǔdiàn', 'ticket': 'piào', 'map': 'dìtú'},
+        'food': {'bread': 'miànbāo', 'milk': 'niúnǎi', 'water': 'shuǐ', 'apple': 'píngguǒ'},
+        'time': {'today': 'jīntiān', 'tomorrow': 'míngtiān', 'now': 'xiànzài', 'later': 'shāohòu'}
     },
     'it': {
         'hello': 'ciao', 'thank': 'grazie', 'goodbye': 'arrivederci', 'please': 'per favore',
+        'yes': 'sì', 'no': 'no', 'sorry': 'scusa', 'excuse': 'scusi',
         'numbers': ['uno','due','tre','quattro','cinque','sei','sette','otto','nove','dieci'],
         'colors': ['rosso','blu','verde','giallo','nero','bianco','arancione','viola'],
         'family': {'father': 'padre', 'mother': 'madre', 'brother': 'fratello', 'sister': 'sorella'},
-        'travel': {'airport': 'aeroporto', 'hotel': 'hotel', 'ticket': 'biglietto', 'map': 'mappa'}
+        'travel': {'airport': 'aeroporto', 'hotel': 'hotel', 'ticket': 'biglietto', 'map': 'mappa'},
+        'food': {'bread': 'pane', 'milk': 'latte', 'water': 'acqua', 'apple': 'mela'},
+        'time': {'today': 'oggi', 'tomorrow': 'domani', 'now': 'ora', 'later': 'più tardi'}
     },
     'pt': {
         'hello': 'olá', 'thank': 'obrigado', 'goodbye': 'adeus', 'please': 'por favor',
+        'yes': 'sim', 'no': 'não', 'sorry': 'desculpe', 'excuse': 'com licença',
         'numbers': ['um','dois','três','quatro','cinco','seis','sete','oito','nove','dez'],
         'colors': ['vermelho','azul','verde','amarelo','preto','branco','laranja','roxo'],
         'family': {'father': 'pai', 'mother': 'mãe', 'brother': 'irmão', 'sister': 'irmã'},
-        'travel': {'airport': 'aeroporto', 'hotel': 'hotel', 'ticket': 'bilhete', 'map': 'mapa'}
+        'travel': {'airport': 'aeroporto', 'hotel': 'hotel', 'ticket': 'bilhete', 'map': 'mapa'},
+        'food': {'bread': 'pão', 'milk': 'leche', 'water': 'água', 'apple': 'maçã'},
+        'time': {'today': 'hoje', 'tomorrow': 'amanhã', 'now': 'agora', 'later': 'mais tarde'}
     },
     'ko': {
         'hello': 'annyeong', 'thank': 'gamsahamnida', 'goodbye': 'annyeonghi gaseyo', 'please': 'butakamnida',
+        'yes': 'ne', 'no': 'aniyo', 'sorry': 'mianhaeyo', 'excuse': 'silyehamnida',
         'numbers': ['hana','dul','set','net','daseot','yeoseot','ilgop','yeodal','ahop','yeol'],
         'colors': ['ppalgan','paran','nok','hwang','geomjeong','hayan','juhwang','bora'],
         'family': {'father': 'abeoji', 'mother': 'eomeoni', 'brother': 'hyeong', 'sister': 'nuna'},
-        'travel': {'airport': 'gonghang', 'hotel': 'hotel', 'ticket': 'pyo', 'map': 'jido'}
+        'travel': {'airport': 'gonghang', 'hotel': 'hotel', 'ticket': 'pyo', 'map': 'jido'},
+        'food': {'bread': 'ppang', 'milk': 'uyu', 'water': 'mul', 'apple': 'sagwa'},
+        'time': {'today': 'oneul', 'tomorrow': 'naeil', 'now': 'jigeum', 'later': 'najunge'}
     },
     'ru': {
         'hello': 'privet', 'thank': 'spasibo', 'goodbye': 'do svidaniya', 'please': 'pozhaluysta',
+        'yes': 'da', 'no': 'nyet', 'sorry': 'izvinite', 'excuse': 'prostite',
         'numbers': ['odin','dva','tri','chetyre','pyat','shest','sem','vosem','devyat','desyat'],
         'colors': ['krasnyy','siniy','zelyonyy','zholtyy','chernyy','belyy','oranzhevyy','fioletovyy'],
         'family': {'father': 'otez', 'mother': 'mat', 'brother': 'brat', 'sister': 'sestra'},
-        'travel': {'airport': 'aeroport', 'hotel': 'otel', 'ticket': 'bilet', 'map': 'karta'}
+        'travel': {'airport': 'aeroport', 'hotel': 'otel', 'ticket': 'bilet', 'map': 'karta'},
+        'food': {'bread': 'khleb', 'milk': 'moloko', 'water': 'voda', 'apple': 'yabloko'},
+        'time': {'today': 'segodnya', 'tomorrow': 'zavtra', 'now': 'seychas', 'later': 'pozzhe'}
     },
     'ar': {
         'hello': 'marhaba', 'thank': 'shukran', 'goodbye': 'maʿa s-salāma', 'please': 'min fadlak',
+        'yes': 'na’am', 'no': 'laa', 'sorry': 'aasif', 'excuse': 'al-ma’dhirah',
         'numbers': ['wahid','ithnan','thalatha','arbaʿa','khamsa','sitta','sab\'a','thamaniya','tis\'a','ashara'],
         'colors': ['ahmar','azraq','akhḍar','asfar','aswad','abyad','burtuqaali','banafsaji'],
         'family': {'father': 'ab', 'mother': 'umm', 'brother': 'akh', 'sister': 'ukht'},
-        'travel': {'airport': 'mataar', 'hotel': 'funduq', 'ticket': 'tadhkira', 'map': 'kharita'}
+        'travel': {'airport': 'mataar', 'hotel': 'funduq', 'ticket': 'tadhkira', 'map': 'kharita'},
+        'food': {'bread': 'khubz', 'milk': 'haleeb', 'water': 'maa', 'apple': 'tuffah'},
+        'time': {'today': 'al-yawm', 'tomorrow': 'ghadan', 'now': 'al-aan', 'later': 'laahiqan'}
     },
 }
 
-def make_greetings_lesson(code, name, data, order):
-    hello = data.get('hello', f'hello_{code}')
+import random
+
+# ── In-memory session store ──────────────────────────────────────────────────
+# Maps session_token -> list of question dicts selected for that play-through.
+# Consumed (deleted) once the lesson is submitted for grading.
+_lesson_sessions: dict = {}
+
+
+# ── Per-lesson question pool builders ────────────────────────────────────────
+
+def build_greetings_pool(code, name, data):
+    hello   = data.get('hello',   'hello')
     goodbye = data.get('goodbye', 'goodbye')
-    thank = data.get('thank', 'thank you')
-    return {
-        'id': f"{code}-greetings-{order}",
-        'language': code,
-        'title': 'Greetings',
-        'description': f'Basic greetings in {name}',
-        'order': order,
-        'xp_reward': 15,
-        'content': [
-            {'type': 'voice', 'question': f'Listen and repeat: {hello}', 'correct_answer': hello, 'voice_url': f'/audio/{code}/hello.mp3'},
-            {'type': 'multiple_choice', 'question': f"What does '{hello}' mean?", 'options': ['Hello', 'Goodbye', 'Thank you', 'Please'], 'correct_answer': 'Hello'},
-            {'type': 'written', 'question': f"How do you say 'Thank you' in {name}?", 'correct_answer': thank},
-            {'type': 'multiple_choice', 'question': f"How do you say 'Goodbye' in {name}?", 'options': [goodbye, hello, thank, 'please'], 'correct_answer': goodbye},
-        ]
-    }
+    thank   = data.get('thank',   'thank you')
+    please  = data.get('please',  'please')
+    return [
+        {'type': 'voice',           'question': f'Listen and repeat: {hello}',              'correct_answer': hello,   'hint': 'Hello'},
+        {'type': 'multiple_choice', 'question': f"What does '{hello}' mean?",               'options': ['Goodbye','Hello','Thank you','Please'],    'correct_answer': 'Hello'},
+        {'type': 'written',         'question': f"Write 'Hello' in {name}",                 'correct_answer': hello,   'hint': f"Starts with '{hello[0].upper()}'"},
+        {'type': 'multiple_choice', 'question': f"How do you say 'Goodbye' in {name}?",    'options': [goodbye, hello, thank, please],             'correct_answer': goodbye},
+        {'type': 'written',         'question': f"Write 'Thank you' in {name}",             'correct_answer': thank,   'hint': f"Starts with '{thank[0].upper()}'"},
+        {'type': 'multiple_choice', 'question': f"What does '{thank}' mean?",               'options': ['Hello','Goodbye','Thank you','Please'],    'correct_answer': 'Thank you'},
+        {'type': 'multiple_choice', 'question': f"'{please}' means:",                       'options': ['Thank you','Hello','Goodbye','Please'],    'correct_answer': 'Please'},
+        {'type': 'written',         'question': f"Write 'Please' in {name}",                'correct_answer': please,  'hint': f"Starts with '{please[0].upper()}'"},
+        {'type': 'multiple_choice', 'question': f"What does '{goodbye}' mean?",             'options': ['Hello','Thank you','Goodbye','Please'],    'correct_answer': 'Goodbye'},
+        {'type': 'voice',           'question': f'Listen and repeat: {goodbye}',            'correct_answer': goodbye, 'hint': 'Goodbye'},
+        {'type': 'multiple_choice', 'question': f"Which of these is a greeting in {name}?",'options': [hello, 'pizza','taxi','hotel'],              'correct_answer': hello},
+        {'type': 'written',         'question': f"Write 'Goodbye' in {name}",               'correct_answer': goodbye, 'hint': f"Starts with '{goodbye[0].upper()}'"},
+    ]
 
-def make_numbers_lesson(code, name, data, order):
-    nums = data.get('numbers', ['one','two','three','four','five'])
-    return {
-        'id': f"{code}-numbers-{order}",
-        'language': code,
-        'title': 'Numbers',
-        'description': f'Counting basics in {name}',
-        'order': order,
-        'xp_reward': 15,
-        'content': [
-            {'type': 'voice', 'question': f'Listen and repeat: {nums[0]}, {nums[1]}, {nums[2]}', 'correct_answer': ' '.join(nums[:3])},
-            {'type': 'multiple_choice', 'question': f"What is '{nums[2]}' in English?", 'options': ['One', 'Two', 'Three', 'Four'], 'correct_answer': 'Three'},
-            {'type': 'written', 'question': f"Write the number 5 in {name}", 'correct_answer': nums[4]},
-        ]
-    }
+def build_numbers_pool(code, name, data):
+    n = data.get('numbers', ['one','two','three','four','five','six','seven','eight','nine','ten'])
+    return [
+        {'type': 'voice',           'question': f'Listen: {n[0]}, {n[1]}, {n[2]}',          'correct_answer': f'{n[0]} {n[1]} {n[2]}', 'hint': '1, 2, 3'},
+        {'type': 'multiple_choice', 'question': f"What is '{n[0]}' in English?",             'options': ['One','Two','Three','Four'],    'correct_answer': 'One'},
+        {'type': 'multiple_choice', 'question': f"What is '{n[1]}' in English?",             'options': ['One','Two','Three','Four'],    'correct_answer': 'Two'},
+        {'type': 'multiple_choice', 'question': f"What is '{n[2]}' in English?",             'options': ['One','Two','Three','Four'],    'correct_answer': 'Three'},
+        {'type': 'written',         'question': f"Write the number 1 in {name}",             'correct_answer': n[0], 'hint': f"'{n[0]}'"},
+        {'type': 'written',         'question': f"Write the number 5 in {name}",             'correct_answer': n[4], 'hint': f"'{n[4]}'"},
+        {'type': 'written',         'question': f"Write the number 3 in {name}",             'correct_answer': n[2], 'hint': f"'{n[2]}'"},
+        {'type': 'multiple_choice', 'question': f"What is '{n[4]}' in English?",             'options': ['Three','Four','Five','Six'],   'correct_answer': 'Five'},
+        {'type': 'multiple_choice', 'question': f"What is '{n[6]}' in English?",             'options': ['Five','Six','Seven','Eight'], 'correct_answer': 'Seven'},
+        {'type': 'written',         'question': f"Write the number 7 in {name}",             'correct_answer': n[6], 'hint': f"'{n[6]}'"},
+        {'type': 'multiple_choice', 'question': f"What comes after '{n[1]}' in {name}?",    'options': [n[0],n[2],n[3],n[4]],         'correct_answer': n[2]},
+        {'type': 'multiple_choice', 'question': f"What comes before '{n[4]}' in {name}?",   'options': [n[2],n[3],n[5],n[6]],         'correct_answer': n[3]},
+        {'type': 'written',         'question': f"Write the number 10 in {name}",            'correct_answer': n[9], 'hint': f"'{n[9]}'"},
+        {'type': 'multiple_choice', 'question': f"Which number is '{n[9]}'?",                'options': ['Eight','Nine','Ten','Seven'], 'correct_answer': 'Ten'},
+    ]
 
-def make_colors_lesson(code, name, data, order):
-    cols = data.get('colors', ['red','blue','green','yellow'])
-    return {
-        'id': f"{code}-colors-{order}",
-        'language': code,
-        'title': 'Colors',
-        'description': f'Common colors in {name}',
-        'order': order,
-        'xp_reward': 15,
-        'content': [
-            {'type': 'voice', 'question': f'Listen: {cols[0]} means {cols[0]}', 'correct_answer': cols[0]},
-            {'type': 'multiple_choice', 'question': f"Which color is '{cols[1]}'?", 'options': ['Red','Green','Blue','Yellow'], 'correct_answer': 'Blue'},
-            {'type': 'written', 'question': f"Write 'Green' in {name}", 'correct_answer': cols[2]},
-        ]
-    }
+def build_colors_pool(code, name, data):
+    c = data.get('colors', ['red','blue','green','yellow','black','white','orange','purple'])
+    return [
+        {'type': 'voice',           'question': f"Listen: {c[0]} means Red",               'correct_answer': c[0], 'hint': 'Red'},
+        {'type': 'multiple_choice', 'question': f"What color is '{c[0]}'?",                'options': ['Red','Blue','Green','Yellow'],   'correct_answer': 'Red'},
+        {'type': 'multiple_choice', 'question': f"What color is '{c[1]}'?",                'options': ['Red','Blue','Green','Yellow'],   'correct_answer': 'Blue'},
+        {'type': 'multiple_choice', 'question': f"What color is '{c[2]}'?",                'options': ['Red','Blue','Green','Yellow'],   'correct_answer': 'Green'},
+        {'type': 'multiple_choice', 'question': f"What color is '{c[3]}'?",                'options': ['Red','Blue','Yellow','Black'],   'correct_answer': 'Yellow'},
+        {'type': 'written',         'question': f"Write 'Red' in {name}",                  'correct_answer': c[0], 'hint': f"'{c[0]}'"},
+        {'type': 'written',         'question': f"Write 'Blue' in {name}",                 'correct_answer': c[1], 'hint': f"'{c[1]}'"},
+        {'type': 'written',         'question': f"Write 'Green' in {name}",                'correct_answer': c[2], 'hint': f"'{c[2]}'"},
+        {'type': 'written',         'question': f"Write 'Yellow' in {name}",               'correct_answer': c[3], 'hint': f"'{c[3]}'"},
+        {'type': 'multiple_choice', 'question': f"How do you say 'Black' in {name}?",      'options': [c[4],c[0],c[2],c[6]],           'correct_answer': c[4]},
+        {'type': 'multiple_choice', 'question': f"How do you say 'White' in {name}?",      'options': [c[4],c[5],c[6],c[2]],           'correct_answer': c[5]},
+        {'type': 'written',         'question': f"Write 'Black' in {name}",                'correct_answer': c[4], 'hint': f"'{c[4]}'"},
+        {'type': 'multiple_choice', 'question': f"What color is '{c[6]}'?",                'options': ['Red','Purple','Orange','Yellow'],'correct_answer': 'Orange'},
+        {'type': 'multiple_choice', 'question': f"What color is '{c[7]}'?",                'options': ['Blue','Purple','Orange','Black'],'correct_answer': 'Purple'},
+    ]
 
-def make_phrases_lesson(code, name, data, order):
-    return {
-        'id': f"{code}-phrases-{order}",
-        'language': code,
-        'title': 'Useful Phrases',
-        'description': f'Useful everyday phrases in {name}',
-        'order': order,
-        'xp_reward': 20,
-        'content': [
-            {'type': 'multiple_choice', 'question': 'How would you politely ask for help?', 'options': ['Can you help me?', 'I do not know', 'Goodbye', 'Thank you'], 'correct_answer': 'Can you help me?'},
-            {'type': 'written', 'question': f"Translate 'Please' into {name}", 'correct_answer': data.get('please', 'please')},
-            {'type': 'multiple_choice', 'question': 'Which phrase shows gratitude?', 'options': ['Hello','Thank you','Goodbye','Please'], 'correct_answer': 'Thank you'},
-        ]
-    }
+def build_phrases_pool(code, name, data):
+    yes    = data.get('yes',    'yes')
+    no     = data.get('no',     'no')
+    sorry  = data.get('sorry',  'sorry')
+    excuse = data.get('excuse', 'excuse me')
+    return [
+        {'type': 'written',         'question': f"How do you say 'Yes' in {name}?",         'correct_answer': yes,    'hint': f"'{yes}'"},
+        {'type': 'written',         'question': f"How do you say 'No' in {name}?",          'correct_answer': no,     'hint': f"'{no}'"},
+        {'type': 'written',         'question': f"Write 'Sorry' in {name}",                 'correct_answer': sorry,  'hint': f"'{sorry}'"},
+        {'type': 'written',         'question': f"Write 'Excuse me' in {name}",             'correct_answer': excuse, 'hint': f"'{excuse}'"},
+        {'type': 'multiple_choice', 'question': f"What does '{yes}' mean?",                 'options': ['Yes','No','Maybe','Please'],   'correct_answer': 'Yes'},
+        {'type': 'multiple_choice', 'question': f"What does '{no}' mean?",                  'options': ['Yes','No','Maybe','Thank you'],'correct_answer': 'No'},
+        {'type': 'multiple_choice', 'question': f"How do you say 'Sorry' in {name}?",       'options': [sorry, excuse, 'hola', 'si'],   'correct_answer': sorry},
+        {'type': 'multiple_choice', 'question': f"How do you say 'Excuse me' in {name}?",   'options': [excuse, sorry, 'no', 'por favor'], 'correct_answer': excuse},
+        {'type': 'voice',           'question': f"Listen and repeat: {sorry}",              'correct_answer': sorry,  'hint': 'Sorry'},
+        {'type': 'voice',           'question': f"Listen and repeat: {excuse}",             'correct_answer': excuse, 'hint': 'Excuse me'},
+    ]
 
-def make_family_lesson(code, name, data, order):
-    family = data.get('family', {})
-    return {
-        'id': f"{code}-family-{order}",
-        'language': code,
-        'title': 'Family Members',
-        'description': f'Learn family vocabulary in {name}',
-        'order': order,
-        'xp_reward': 20,
-        'content': [
-            {'type': 'multiple_choice', 'question': f"How do you say 'Mother' in {name}?", 'options': [family.get('mother', 'mother'), family.get('father', 'father'), 'cousin', 'aunt'], 'correct_answer': family.get('mother', 'mother')},
-            {'type': 'written', 'question': f"Write 'Father' in {name}", 'correct_answer': family.get('father', 'father')},
-            {'type': 'multiple_choice', 'question': f"'{family.get('brother', 'brother')}' means:", 'options': ['Sister', 'Brother', 'Uncle', 'Grandfather'], 'correct_answer': 'Brother'},
-        ]
-    }
+def build_family_pool(code, name, data):
+    fam     = data.get('family', {})
+    father  = fam.get('father',  'father')
+    mother  = fam.get('mother',  'mother')
+    brother = fam.get('brother', 'brother')
+    sister  = fam.get('sister',  'sister')
+    return [
+        {'type': 'multiple_choice', 'question': f"How do you say 'Mother' in {name}?",         'options': [mother,father,brother,sister], 'correct_answer': mother},
+        {'type': 'multiple_choice', 'question': f"How do you say 'Father' in {name}?",         'options': [mother,father,brother,sister], 'correct_answer': father},
+        {'type': 'written',         'question': f"Write 'Father' in {name}",                    'correct_answer': father,  'hint': f"'{father}'"},
+        {'type': 'written',         'question': f"Write 'Mother' in {name}",                    'correct_answer': mother,  'hint': f"'{mother}'"},
+        {'type': 'multiple_choice', 'question': f"'{brother}' means:",                          'options': ['Sister','Brother','Uncle','Grandfather'], 'correct_answer': 'Brother'},
+        {'type': 'multiple_choice', 'question': f"'{sister}' means:",                           'options': ['Mother','Aunt','Sister','Grandmother'],   'correct_answer': 'Sister'},
+        {'type': 'written',         'question': f"Write 'Brother' in {name}",                   'correct_answer': brother, 'hint': f"'{brother}'"},
+        {'type': 'written',         'question': f"Write 'Sister' in {name}",                    'correct_answer': sister,  'hint': f"'{sister}'"},
+        {'type': 'multiple_choice', 'question': f"Who is your parent in {name}?",               'options': [mother,'friend','teacher','boss'], 'correct_answer': mother},
+        {'type': 'multiple_choice', 'question': f"'{father}' refers to your:",                  'options': ['Mother','Father','Brother','Sister'], 'correct_answer': 'Father'},
+        {'type': 'multiple_choice', 'question': f"Which word means a female sibling in {name}?",'options': [brother,sister,mother,father],         'correct_answer': sister},
+    ]
 
-def make_travel_lesson(code, name, data, order):
-    travel = data.get('travel', {})
-    return {
-        'id': f"{code}-travel-{order}",
-        'language': code,
-        'title': 'Travel & Directions',
-        'description': f'Useful travel words in {name}',
-        'order': order,
-        'xp_reward': 25,
-        'content': [
-            {'type': 'multiple_choice', 'question': f"Where would you go to catch a flight in {name}?", 'options': [travel.get('hotel', 'hotel'), travel.get('airport', 'airport'), 'beach', 'park'], 'correct_answer': travel.get('airport', 'airport')},
-            {'type': 'written', 'question': f"How do you say 'Ticket' in {name}?", 'correct_answer': travel.get('ticket', 'ticket')},
-            {'type': 'multiple_choice', 'question': f"You need a '{travel.get('map', 'map')}' to find your way. What is it?", 'options': ['Compass', 'Phone', 'Map', 'Guide'], 'correct_answer': 'Map'},
-        ]
-    }
+def build_travel_pool(code, name, data):
+    tr      = data.get('travel', {})
+    airport = tr.get('airport', 'airport')
+    hotel   = tr.get('hotel',   'hotel')
+    ticket  = tr.get('ticket',  'ticket')
+    map_    = tr.get('map',     'map')
+    return [
+        {'type': 'multiple_choice', 'question': f"Where would you go to catch a flight in {name}?",  'options': [airport,hotel,'beach','park'],       'correct_answer': airport},
+        {'type': 'written',         'question': f"How do you say 'Ticket' in {name}?",               'correct_answer': ticket,  'hint': f"'{ticket}'"},
+        {'type': 'multiple_choice', 'question': f"You need a '{map_}' to find your way. What is it?", 'options': ['Compass','Phone','Map','Guide'],    'correct_answer': 'Map'},
+        {'type': 'multiple_choice', 'question': f"Where do you sleep when traveling in {name}?",     'options': [hotel,airport,ticket,map_],          'correct_answer': hotel},
+        {'type': 'written',         'question': f"Write 'Airport' in {name}",                         'correct_answer': airport, 'hint': f"'{airport}'"},
+        {'type': 'written',         'question': f"Write 'Hotel' in {name}",                           'correct_answer': hotel,   'hint': f"'{hotel}'"},
+        {'type': 'multiple_choice', 'question': f"'{ticket}' means:",                                 'options': ['Hotel','Map','Ticket','Airport'],   'correct_answer': 'Ticket'},
+        {'type': 'multiple_choice', 'question': f"'{airport}' means:",                                'options': ['Hotel','Airport','Map','Station'],  'correct_answer': 'Airport'},
+        {'type': 'written',         'question': f"Write 'Map' in {name}",                             'correct_answer': map_,    'hint': f"'{map_}'"},
+        {'type': 'multiple_choice', 'question': f"You need '{ticket}' to board a train. What is it?", 'options': ['A passport','A ticket','A map','A bag'], 'correct_answer': 'A ticket'},
+    ]
+
+def build_food_pool(code, name, data):
+    f     = data.get('food', {})
+    bread = f.get('bread', 'bread')
+    milk  = f.get('milk',  'milk')
+    water = f.get('water', 'water')
+    apple = f.get('apple', 'apple')
+    return [
+        {'type': 'multiple_choice', 'question': f"How do you say 'Water' in {name}?",  'options': [water,'juice','wine','soda'],      'correct_answer': water},
+        {'type': 'written',         'question': f"Write 'Bread' in {name}",             'correct_answer': bread, 'hint': f"'{bread}'"},
+        {'type': 'multiple_choice', 'question': f"'{milk}' means:",                     'options': ['Bread','Water','Milk','Apple'],   'correct_answer': 'Milk'},
+        {'type': 'multiple_choice', 'question': f"What beverage is '{water}'?",         'options': ['Juice','Water','Milk','Coffee'],  'correct_answer': 'Water'},
+        {'type': 'written',         'question': f"Write 'Water' in {name}",             'correct_answer': water, 'hint': f"'{water}'"},
+        {'type': 'written',         'question': f"Write 'Milk' in {name}",              'correct_answer': milk,  'hint': f"'{milk}'"},
+        {'type': 'multiple_choice', 'question': f"'{bread}' is a type of:",             'options': ['Drink','Fruit','Bread','Vegetable'], 'correct_answer': 'Bread'},
+        {'type': 'multiple_choice', 'question': f"How do you say 'Apple' in {name}?",  'options': [apple,bread,milk,water],          'correct_answer': apple},
+        {'type': 'written',         'question': f"Write 'Apple' in {name}",             'correct_answer': apple, 'hint': f"'{apple}'"},
+        {'type': 'multiple_choice', 'question': f"'{apple}' is a:",                     'options': ['Vegetable','Drink','Bread','Fruit'], 'correct_answer': 'Fruit'},
+        {'type': 'multiple_choice', 'question': f"Which of these is a drink in {name}?",'options': [water,bread,apple,'table'],       'correct_answer': water},
+    ]
+
+def build_time_pool(code, name, data):
+    t        = data.get('time', {})
+    today    = t.get('today',    'today')
+    tomorrow = t.get('tomorrow', 'tomorrow')
+    now      = t.get('now',      'now')
+    later    = t.get('later',    'later')
+    return [
+        {'type': 'multiple_choice', 'question': f"How do you say 'Today' in {name}?",    'options': [today,tomorrow,now,later],         'correct_answer': today},
+        {'type': 'written',         'question': f"How do you say 'Now' in {name}?",      'correct_answer': now,      'hint': f"'{now}'"},
+        {'type': 'multiple_choice', 'question': f"'{later}' means:",                     'options': ['Now','Never','Later','Always'],    'correct_answer': 'Later'},
+        {'type': 'multiple_choice', 'question': f"How do you say 'Tomorrow' in {name}?",'options': [now,today,later,tomorrow],          'correct_answer': tomorrow},
+        {'type': 'written',         'question': f"Write 'Today' in {name}",              'correct_answer': today,    'hint': f"'{today}'"},
+        {'type': 'written',         'question': f"Write 'Tomorrow' in {name}",           'correct_answer': tomorrow, 'hint': f"'{tomorrow}'"},
+        {'type': 'multiple_choice', 'question': f"'{today}' means:",                     'options': ['Yesterday','Tomorrow','Today','Later'],   'correct_answer': 'Today'},
+        {'type': 'multiple_choice', 'question': f"'{now}' means:",                       'options': ['Later','Never','Now','Today'],    'correct_answer': 'Now'},
+        {'type': 'written',         'question': f"Write 'Later' in {name}",              'correct_answer': later,    'hint': f"'{later}'"},
+        {'type': 'multiple_choice', 'question': f"'{tomorrow}' means:",                  'options': ['Today','Yesterday','Now','Tomorrow'], 'correct_answer': 'Tomorrow'},
+        {'type': 'multiple_choice', 'question': f"If today is Monday, '{tomorrow}' is:", 'options': ['Sunday','Monday','Tuesday','Wednesday'], 'correct_answer': 'Tuesday'},
+    ]
+
+
+_POOL_BUILDERS = [
+    ('Greetings',      'Basic greetings and farewells',          15, build_greetings_pool),
+    ('Numbers',        'Count from 1 to 10',                     15, build_numbers_pool),
+    ('Colors',         'Common colors vocabulary',               15, build_colors_pool),
+    ('Useful Phrases', 'Polite everyday expressions',            20, build_phrases_pool),
+    ('Family Members', 'Vocabulary for family relationships',    20, build_family_pool),
+    ('Travel',         'Essential words for traveling',          25, build_travel_pool),
+    ('Food & Drink',   'Common food and drink vocabulary',       20, build_food_pool),
+    ('Time',           'Expressing time and days',               20, build_time_pool),
+]
 
 for lang in LANGUAGES:
     code = lang['code']
@@ -505,101 +567,45 @@ for lang in LANGUAGES:
     data = common_phrases.get(code, {})
     if code not in SAMPLE_LESSONS:
         SAMPLE_LESSONS[code] = []
-    # Ensure at least 6 lessons with meaningful content
-    while len(SAMPLE_LESSONS[code]) < 6:
-        idx = len(SAMPLE_LESSONS[code]) + 1
-        if idx == 1:
-            SAMPLE_LESSONS[code].append(make_greetings_lesson(code, name, data, idx))
-        elif idx == 2:
-            SAMPLE_LESSONS[code].append(make_numbers_lesson(code, name, data, idx))
-        elif idx == 3:
-            SAMPLE_LESSONS[code].append(make_colors_lesson(code, name, data, idx))
-        elif idx == 4:
-            SAMPLE_LESSONS[code].append(make_phrases_lesson(code, name, data, idx))
-        elif idx == 5:
-            SAMPLE_LESSONS[code].append(make_family_lesson(code, name, data, idx))
-        else:
-            SAMPLE_LESSONS[code].append(make_travel_lesson(code, name, data, idx))
+    existing_orders = {l['order'] for l in SAMPLE_LESSONS[code]}
+    for order, (title, desc, xp, builder) in enumerate(_POOL_BUILDERS, start=1):
+        if order in existing_orders:
+            # Upgrade any pre-existing lessons to use a question_pool
+            for l in SAMPLE_LESSONS[code]:
+                if l['order'] == order and 'question_pool' not in l:
+                    l['question_pool'] = builder(code, name, data)
+            continue
+        lesson_id = f"{code}-{title.lower().replace(' ', '-').replace('&', 'and')}-{order}"
+        SAMPLE_LESSONS[code].append({
+            'id':            lesson_id,
+            'language':      code,
+            'title':         title,
+            'description':   f'{desc} in {name}',
+            'order':         order,
+            'xp_reward':     xp,
+            'question_pool': builder(code, name, data),
+        })
 
-FLASHCARD_SETS = {
-    "es": [
-        {
-            "id": "es-flash-1",
-            "language": "es",
-            "title": "Basic Words",
-            "cards": [
-                {"front": "Hello", "back": "Hola", "voice_url": "/audio/es/hola.mp3"},
-                {"front": "Goodbye", "back": "Adiós", "voice_url": "/audio/es/adios.mp3"},
-                {"front": "Thank you", "back": "Gracias", "voice_url": "/audio/es/gracias.mp3"},
-                {"front": "Please", "back": "Por favor", "voice_url": "/audio/es/porfavor.mp3"},
-                {"front": "Yes", "back": "Sí", "voice_url": "/audio/es/si.mp3"},
-                {"front": "No", "back": "No", "voice_url": "/audio/es/no.mp3"},
-            ]
-        },
-        {
-            "id": "es-flash-2",
-            "language": "es",
-            "title": "Travel Essentials",
-            "cards": [
-                {"front": "Airport", "back": "Aeropuerto"},
-                {"front": "Passport", "back": "Pasaporte"},
-                {"front": "Ticket", "back": "Boleto"},
-                {"front": "Bag", "back": "Maleta"},
-            ]
-        }
-    ],
-    "fr": [
-        {
-            "id": "fr-flash-1",
-            "language": "fr",
-            "title": "Basic Words",
-            "cards": [
-                {"front": "Hello", "back": "Bonjour", "voice_url": "/audio/fr/bonjour.mp3"},
-                {"front": "Goodbye", "back": "Au revoir", "voice_url": "/audio/fr/aurevoir.mp3"},
-                {"front": "Thank you", "back": "Merci", "voice_url": "/audio/fr/merci.mp3"},
-                {"front": "Please", "back": "S'il vous plaît", "voice_url": "/audio/fr/svp.mp3"},
-            ]
-        }
-    ],
-    "it": [
-        {
-            "id": "it-flash-1",
-            "language": "it",
-            "title": "Common Phrases",
-            "cards": [
-                {"front": "How much does it cost?", "back": "Quanto costa?"},
-                {"front": "Where is the bathroom?", "back": "Dov'è il bagno?"},
-                {"front": "I don't understand", "back": "Non capisco"},
-            ]
-        }
-    ],
-    "ja": [
-        {
-            "id": "ja-flash-1",
-            "language": "ja",
-            "title": "Essential Verbs",
-            "cards": [
-                {"front": "To eat", "back": "Taberu"},
-                {"front": "To drink", "back": "Nomu"},
-                {"front": "To go", "back": "Iku"},
-                {"front": "To come", "back": "Kuru"},
-            ]
-        }
-    ]
-}
+# Removed redundant FLASHCARD_SETS dictionary. Flashcards are now generated dynamically.
 
 ACHIEVEMENTS = [
     {"id": "first-lesson", "name": "First Steps", "description": "Complete your first lesson", "icon": "baby"},
+    {"id": "lesson-5", "name": "Consistent Learner", "description": "Complete 5 different lessons", "icon": "book"},
+    {"id": "lesson-20", "name": "Dedicated Scholar", "description": "Complete 20 different lessons", "icon": "library"},
     {"id": "streak-3", "name": "On Fire", "description": "Maintain a 3-day streak", "icon": "flame"},
     {"id": "streak-7", "name": "Week Warrior", "description": "Maintain a 7-day streak", "icon": "calendar"},
     {"id": "streak-30", "name": "Monthly Master", "description": "Maintain a 30-day streak", "icon": "trophy"},
-    {"id": "xp-100", "name": "Century Club", "description": "Earn 100 XP", "icon": "zap"},
-    {"id": "xp-500", "name": "XP Master", "description": "Earn 500 XP", "icon": "star"},
-    {"id": "xp-1000", "name": "Legend", "description": "Earn 1000 XP", "icon": "crown"},
-    {"id": "perfect-lesson", "name": "Perfectionist", "description": "Complete a lesson with 100% accuracy", "icon": "target"},
-    {"id": "multi-language", "name": "Polyglot", "description": "Start learning 3 languages", "icon": "globe"},
-    {"id": "level-5", "name": "Rising Star", "description": "Reach level 5", "icon": "sparkles"},
-    {"id": "level-10", "name": "Expert Learner", "description": "Reach level 10", "icon": "award"},
+    {"id": "streak-100", "name": "Centurion", "description": "Maintain a legendary 100-day streak", "icon": "shield"},
+    {"id": "xp-100", "name": "Century Club", "description": "Earn 100 total XP", "icon": "zap"},
+    {"id": "xp-500", "name": "XP Master", "description": "Earn 500 total XP", "icon": "star"},
+    {"id": "xp-5000", "name": "Titan", "description": "Earn a massive 5000 total XP", "icon": "gem"},
+    {"id": "xp-1000", "name": "Legend", "description": "Earn 1000 total XP", "icon": "crown"},
+    {"id": "perfect-lesson", "name": "Perfectionist", "description": "Complete any lesson with 100% accuracy", "icon": "target"},
+    {"id": "perfect-5", "name": "Sniper", "description": "Complete 5 different lessons with 100% accuracy", "icon": "crosshair"},
+    {"id": "multi-language", "name": "Polyglot", "description": "Start your journey in at least 3 different languages", "icon": "globe"},
+    {"id": "lang-5", "name": "Global Talker", "description": "Explore the world by learning 5 different languages", "icon": "map_pin"},
+    {"id": "level-5", "name": "Rising Star", "description": "Reach Level 5 by earning XP", "icon": "sparkles"},
+    {"id": "level-10", "name": "Expert Learner", "description": "Reach Level 10 - a true language master", "icon": "award"},
 ]
 
 # ============ AUTH ROUTES ============
@@ -623,6 +629,12 @@ async def register(user_data: UserCreate):
         'level': 1,
         'streak': 0,
         'hearts': 5,
+        'gems': 0,
+        'league': 'Bronze',
+        'inventory': [],
+        'friends': [],
+        'friend_requests': [],
+        'active_boosters': [],
         'current_language': None,
         'languages_learning': [],
         'achievements': [],
@@ -742,11 +754,22 @@ async def get_lessons(language: str, user: dict = Depends(get_current_user)):
 async def get_lesson_detail(language: str, lesson_id: str, user: dict = Depends(get_current_user)):
     lessons = SAMPLE_LESSONS.get(language, [])
     lesson = next((l for l in lessons if l['id'] == lesson_id), None)
-    
+
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
-    
-    return lesson
+
+    pool = lesson.get('question_pool', lesson.get('content', []))
+    n_pick = min(6, len(pool))
+    selected = random.sample(pool, n_pick) if len(pool) > n_pick else list(pool)
+
+    session_token = str(uuid.uuid4())
+    _lesson_sessions[session_token] = selected
+
+    return {
+        **{k: v for k, v in lesson.items() if k not in ('question_pool', 'content')},
+        'content': selected,
+        'session_token': session_token,
+    }
 
 @api_router.post("/lessons/{language}/{lesson_id}/complete", response_model=QuizResult)
 async def complete_lesson(language: str, lesson_id: str, submission: QuizSubmission, user: dict = Depends(get_current_user)):
@@ -756,22 +779,34 @@ async def complete_lesson(language: str, lesson_id: str, submission: QuizSubmiss
     
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
-    
+
+    # Retrieve the exact questions shown to the user via session token
+    session_questions = None
+    if submission.session_token and submission.session_token in _lesson_sessions:
+        session_questions = _lesson_sessions.pop(submission.session_token)
+    if session_questions is None:
+        # Fallback: use full pool (first 6)
+        pool = lesson.get('question_pool', lesson.get('content', []))
+        session_questions = pool[:6]
+
     # Calculate score
     correct = 0
     for i, answer in enumerate(submission.answers):
-        if i < len(lesson['content']):
-            expected = lesson['content'][i]['correct_answer'].lower().strip()
-            if answer.lower().strip() == expected:
+        if i < len(session_questions):
+            expected = normalize_answer(session_questions[i]['correct_answer'])
+            if normalize_answer(answer) == expected:
                 correct += 1
     
-    total = len(lesson['content'])
-    score_pct = int((correct / total) * 100)
+    total = len(session_questions)
+    score_pct = int((correct / total) * 100) if total else 0
     passed = score_pct >= 70
     
-    # Calculate XP
+    # Calculate XP and Gems
     base_xp = lesson['xp_reward'] if passed else lesson['xp_reward'] // 2
-    streak_bonus = 0
+    gems_earned = 10 if passed else 2
+    if score_pct == 100:
+        base_xp += 5
+        gems_earned += 5
     
     # Update streak
     now = datetime.now(timezone.utc)
@@ -784,35 +819,59 @@ async def complete_lesson(language: str, lesson_id: str, submission: QuizSubmiss
         days_diff = (now.date() - last_date).days
         if days_diff == 1:
             new_streak += 1
-            streak_bonus = min(new_streak * 2, 20)  # Max 20 bonus XP
         elif days_diff > 1:
             new_streak = 1
         # Same day: keep streak
     else:
         new_streak = 1
     
+    streak_bonus = 0
+    if new_streak >= 3: streak_bonus = 2
+    if new_streak >= 7: streak_bonus = 5
+    if new_streak >= 30: streak_bonus = 15
+    
     total_xp = base_xp + streak_bonus
-    new_total_xp = user.get('xp', 0) + total_xp
     
-    # Calculate level (100 XP per level)
-    new_level = (new_total_xp // 100) + 1
+    # Apply Boosters
+    active_boosters = user.get('active_boosters', [])
+    boost_multiplier = 1
+    new_boosters = []
+    
+    for boost in active_boosters:
+        if boost['id'] == 'xp-double' and boost['uses_left'] > 0:
+            boost_multiplier = 2
+            boost['uses_left'] -= 1
+        if boost['uses_left'] > 0:
+            new_boosters.append(boost)
+            
+    total_xp *= boost_multiplier
+    
+    # Update user's XP, gems, streak, and last practice date
+    await db_conn.users.update_one(
+        {'id': user['id']},
+        {
+            '$inc': {'xp': total_xp, 'gems': gems_earned},
+            '$set': {
+                'streak': new_streak, 
+                'last_practice_date': today,
+                'active_boosters': new_boosters
+            }
+        }
+    )
+    
+    # Check for level up
+    new_xp = (user.get('xp', 0)) + total_xp
     old_level = user.get('level', 1)
+    new_level = (new_xp // 100) + 1
     
-    # Update user
-    update_data = {
-        'xp': new_total_xp,
-        'level': new_level,
-        'streak': new_streak,
-        'last_practice_date': today
-    }
+    if new_level > old_level:
+        await db_conn.users.update_one({'id': user['id']}, {'$set': {'level': new_level, 'hearts': 5}})
     
     # Deduct heart if failed
     if not passed:
         hearts = user.get('hearts', 5)
         if hearts > 0:
-            update_data['hearts'] = hearts - 1
-    
-    await db_conn.users.update_one({'id': user['id']}, {'$set': update_data})
+            await db_conn.users.update_one({'id': user['id']}, {'$inc': {'hearts': -1}})
     
     # Save progress
     await db_conn.lesson_progress.update_one(
@@ -828,8 +887,7 @@ async def complete_lesson(language: str, lesson_id: str, submission: QuizSubmiss
         upsert=True
     )
     
-    # Check achievements
-    await check_lesson_achievements(user['id'], new_streak, new_total_xp, new_level, score_pct == 100)
+    await check_lesson_achievements(user['id'], new_streak, new_xp, new_level, score_pct == 100)
     
     return QuizResult(
         correct=correct,
@@ -837,22 +895,129 @@ async def complete_lesson(language: str, lesson_id: str, submission: QuizSubmiss
         xp_earned=total_xp,
         passed=passed,
         new_level=new_level if new_level > old_level else None,
-        streak_bonus=streak_bonus
+        streak_bonus=streak_bonus,
+        gems_earned=gems_earned
     )
 
 # ============ FLASHCARD ROUTES ============
 
+def _build_flashcards_for_lesson(title: str, code: str) -> list:
+    """Return a list of unique {front, back} dicts for the given lesson title."""
+    data = common_phrases.get(code, {})
+    title_lower = title.lower()
+
+    if 'greeting' in title_lower or 'salutation' in title_lower or 'begrüß' in title_lower or 'あいさつ' in title_lower:
+        h = data.get('hello', ''); g = data.get('goodbye', '')
+        t = data.get('thank', ''); p = data.get('please', '')
+        return [
+            {'front': 'Hello',    'back': h} if h else None,
+            {'front': 'Goodbye',  'back': g} if g else None,
+            {'front': 'Thank you','back': t} if t else None,
+            {'front': 'Please',   'back': p} if p else None,
+        ]
+
+    if 'number' in title_lower:
+        nums = data.get('numbers', [])
+        english = ['One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten']
+        return [{'front': english[i], 'back': nums[i]} for i in range(min(len(english), len(nums)))]
+
+    if 'color' in title_lower or 'colour' in title_lower:
+        cols = data.get('colors', [])
+        english = ['Red','Blue','Green','Yellow','Black','White','Orange','Purple']
+        return [{'front': english[i], 'back': cols[i]} for i in range(min(len(english), len(cols)))]
+
+    if 'phrase' in title_lower:
+        y = data.get('yes', '');   n = data.get('no', '')
+        s = data.get('sorry', ''); e = data.get('excuse', '')
+        return [
+            {'front': 'Yes',       'back': y} if y else None,
+            {'front': 'No',        'back': n} if n else None,
+            {'front': 'Sorry',     'back': s} if s else None,
+            {'front': 'Excuse me', 'back': e} if e else None,
+        ]
+
+    if 'family' in title_lower:
+        fam = data.get('family', {})
+        pairs = [('Father', 'father'), ('Mother', 'mother'), ('Brother', 'brother'), ('Sister', 'sister')]
+        return [{'front': eng, 'back': fam[key]} for eng, key in pairs if key in fam]
+
+    if 'travel' in title_lower or 'direction' in title_lower:
+        tr = data.get('travel', {})
+        pairs = [('Airport', 'airport'), ('Hotel', 'hotel'), ('Ticket', 'ticket'), ('Map', 'map')]
+        return [{'front': eng, 'back': tr[key]} for eng, key in pairs if key in tr]
+
+    if 'food' in title_lower or 'drink' in title_lower:
+        f = data.get('food', {})
+        pairs = [('Bread', 'bread'), ('Milk', 'milk'), ('Water', 'water'), ('Apple', 'apple')]
+        return [{'front': eng, 'back': f[key]} for eng, key in pairs if key in f]
+
+    if 'time' in title_lower:
+        t = data.get('time', {})
+        pairs = [('Today', 'today'), ('Tomorrow', 'tomorrow'), ('Now', 'now'), ('Later', 'later')]
+        return [{'front': eng, 'back': t[key]} for eng, key in pairs if key in t]
+
+    return []
+
+
 @api_router.get("/flashcards/{language}", response_model=List[FlashcardSet])
 async def get_flashcards(language: str, user: dict = Depends(get_current_user)):
-    sets = FLASHCARD_SETS.get(language, [])
-    return [FlashcardSet(**s) for s in sets]
+    db_conn = await require_db()
+    lessons = SAMPLE_LESSONS.get(language, [])
+
+    # Get user progress to check locking
+    progress_docs = await db_conn.lesson_progress.find({
+        'user_id': user['id'],
+        'language': language
+    }, {'_id': 0}).to_list(100)
+    progress_map = {p['lesson_id']: p for p in progress_docs}
+
+    result = []
+    for lesson in sorted(lessons, key=lambda l: l['order']):
+        raw_cards = _build_flashcards_for_lesson(lesson['title'], language)
+
+        # Filter None, deduplicate by (front.lower(), back.lower())
+        seen = set()
+        cards = []
+        for card in raw_cards:
+            if not card:
+                continue
+            key = (card['front'].strip().lower(), card['back'].strip().lower())
+            if key in seen or key[0] == key[1]:
+                continue
+            seen.add(key)
+            cards.append({'front': card['front'].strip(), 'back': card['back'].strip()})
+
+        if not cards:
+            continue  # skip lessons with no valid flashcard data
+
+        # Determine if locked
+        locked = False
+        if lesson['order'] > 1:
+            prev_ids = {l['id'] for l in lessons if l.get('order') == lesson['order'] - 1}
+            locked = not any(progress_map.get(pid, {}).get('completed', False) for pid in prev_ids)
+
+        result.append(FlashcardSet(
+            id=f"fs-{lesson['id']}",
+            language=language,
+            title=lesson['title'],
+            order=lesson['order'],
+            cards=cards,
+            locked=locked
+        ))
+
+    return result
 
 # ============ LEADERBOARD ROUTES ============
 
 @api_router.get("/leaderboard", response_model=List[LeaderboardEntry])
-async def get_leaderboard(user: dict = Depends(get_current_user)):
+async def get_leaderboard(league: Optional[str] = None, user: dict = Depends(get_current_user)):
     db_conn = await require_db()
-    users = await db_conn.users.find({}, {'_id': 0, 'password': 0}).sort('xp', -1).limit(50).to_list(50)
+    
+    query = {}
+    if league:
+        query['league'] = league
+    
+    users = await db_conn.users.find(query, {'_id': 0, 'password': 0}).sort('xp', -1).limit(50).to_list(50)
     
     result = []
     for i, u in enumerate(users):
@@ -862,7 +1027,8 @@ async def get_leaderboard(user: dict = Depends(get_current_user)):
             name=u['name'],
             xp=u.get('xp', 0),
             level=u.get('level', 1),
-            streak=u.get('streak', 0)
+            streak=u.get('streak', 0),
+            league=u.get('league', 'Bronze')
         ))
     
     return result
@@ -911,6 +1077,17 @@ async def check_lesson_achievements(user_id: str, streak: int, xp: int, level: i
         await check_and_award_achievement(user_id, 'streak-7')
     if streak >= 30:
         await check_and_award_achievement(user_id, 'streak-30')
+    if streak >= 100:
+        await check_and_award_achievement(user_id, 'streak-100')
+    
+    # Lesson count achievements
+    lessons_completed = await db_conn.lesson_progress.count_documents({'user_id': user_id, 'completed': True})
+    if lessons_completed >= 1:
+        await check_and_award_achievement(user_id, 'first-lesson')
+    if lessons_completed >= 5:
+        await check_and_award_achievement(user_id, 'lesson-5')
+    if lessons_completed >= 20:
+        await check_and_award_achievement(user_id, 'lesson-20')
     
     # XP achievements
     if xp >= 100:
@@ -919,10 +1096,24 @@ async def check_lesson_achievements(user_id: str, streak: int, xp: int, level: i
         await check_and_award_achievement(user_id, 'xp-500')
     if xp >= 1000:
         await check_and_award_achievement(user_id, 'xp-1000')
+    if xp >= 5000:
+        await check_and_award_achievement(user_id, 'xp-5000')
     
-    # Perfect lesson
+    # Perfect lesson achievements
     if perfect:
         await check_and_award_achievement(user_id, 'perfect-lesson')
+    
+    perfect_count = await db_conn.lesson_progress.count_documents({'user_id': user_id, 'score': 100})
+    if perfect_count >= 5:
+        await check_and_award_achievement(user_id, 'perfect-5')
+
+    # Multi-language achievements
+    user_doc = await db_conn.users.find_one({'id': user_id})
+    langs = user_doc.get('languages_learning', [])
+    if len(langs) >= 3:
+        await check_and_award_achievement(user_id, 'multi-language')
+    if len(langs) >= 5:
+        await check_and_award_achievement(user_id, 'lang-5')
     
     # Level achievements
     if level >= 5:
@@ -944,6 +1135,146 @@ async def refill_hearts(user: dict = Depends(get_current_user)):
     # In a real app, this would cost gems or require waiting
     await db_conn.users.update_one({'id': user['id']}, {'$set': {'hearts': 5}})
     return {"message": "Hearts refilled", "hearts": 5}
+
+# ============ SOCIAL ROUTES ============
+
+@api_router.get("/friends", response_model=List[LeaderboardEntry])
+async def get_friends(user: dict = Depends(get_current_user)):
+    db_conn = await require_db()
+    friend_ids = user.get('friends', [])
+    if not friend_ids: return []
+    
+    friends = await db_conn.users.find({'id': {'$in': friend_ids}}, {'_id': 0, 'password': 0}).to_list(100)
+    result = []
+    for i, u in enumerate(friends):
+        result.append(LeaderboardEntry(
+            rank=i + 1,
+            user_id=u['id'],
+            name=u['name'],
+            xp=u.get('xp', 0),
+            level=u.get('level', 1),
+            streak=u.get('streak', 0),
+            league=u.get('league', 'Bronze')
+        ))
+    return result
+
+@api_router.get("/friends/requests", response_model=List[FriendRequest])
+async def get_friend_requests(user: dict = Depends(get_current_user)):
+    db_conn = await require_db()
+    request_ids = user.get('friend_requests', [])
+    if not request_ids: return []
+    
+    requesters = await db_conn.users.find({'id': {'$in': request_ids}}, {'_id': 0, 'password': 0}).to_list(100)
+    return [FriendRequest(id=u['id'], name=u['name'], level=u.get('level', 1)) for u in requesters]
+
+@api_router.post("/friends/request/{target_id}")
+async def send_friend_request(target_id: str, user: dict = Depends(get_current_user)):
+    db_conn = await require_db()
+    if target_id == user['id']:
+        raise HTTPException(status_code=400, detail="Cannot friend yourself")
+    
+    target = await db_conn.users.find_one({'id': target_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    await db_conn.users.update_one({'id': target_id}, {'$addToSet': {'friend_requests': user['id']}})
+    return {"message": "Friend request sent"}
+
+@api_router.post("/friends/accept/{source_id}")
+async def accept_friend_request(source_id: str, user: dict = Depends(get_current_user)):
+    db_conn = await require_db()
+    
+    # Add to both friends lists
+    await db_conn.users.update_one({'id': user['id']}, {
+        '$addToSet': {'friends': source_id},
+        '$pull': {'friend_requests': source_id}
+    })
+    await db_conn.users.update_one({'id': source_id}, {
+        '$addToSet': {'friends': user['id']}
+    })
+    return {"message": "Friend request accepted"}
+
+# ============ SHOP ROUTES ============
+
+SHOP_ITEMS = [
+    {"id": "streak-freeze", "name": "Streak Freeze", "description": "Protects your streak for one day of inactivity.", "cost": 200, "icon": "ice-cube"},
+    {"id": "heart-refill", "name": "Heart Refill", "description": "Instantly refills your hearts to 5.", "cost": 100, "icon": "heart"},
+    {"id": "xp-double", "name": "XP Double", "description": "Double XP for your next 3 lessons!", "cost": 150, "icon": "zap-double"},
+]
+
+GEM_PACKAGES = [
+    {"id": "fistful-gems", "name": "Fistful of Gems", "amount": 250, "price": 39.0, "icon": "fist"},
+    {"id": "pouch-gems", "name": "Pouch of Gems", "amount": 1000, "price": 119.0, "icon": "pouch"},
+    {"id": "chest-gems", "name": "Chest of Gems", "amount": 5000, "price": 449.0, "icon": "chest"},
+]
+
+@api_router.get("/shop", response_model=List[ShopItem])
+async def get_shop():
+    return [ShopItem(**item) for item in SHOP_ITEMS]
+
+@api_router.get("/shop/gems", response_model=List[GemPackage])
+async def get_gem_packages():
+    return [GemPackage(**gem) for gem in GEM_PACKAGES]
+
+@api_router.post("/shop/buy/{item_id}")
+async def buy_item(item_id: str, user: dict = Depends(get_current_user)):
+    db_conn = await require_db()
+    item = next((i for i in SHOP_ITEMS if i['id'] == item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+        
+    if user.get('gems', 0) < item['cost']:
+        raise HTTPException(status_code=400, detail="Not enough gems")
+        
+    # Deduction and inventory update
+    if item_id == 'heart-refill':
+        await db_conn.users.update_one({'id': user['id']}, {'$set': {'hearts': 5}, '$inc': {'gems': -item['cost']}})
+    elif item_id == 'xp-double':
+        await db_conn.users.update_one({'id': user['id']}, {
+            '$push': {'active_boosters': {'id': 'xp-double', 'uses_left': 3}},
+            '$inc': {'gems': -item['cost']}
+        })
+    else:
+        await db_conn.users.update_one({'id': user['id']}, {
+            '$push': {'inventory': item_id},
+            '$inc': {'gems': -item['cost']}
+        })
+        
+    return {"message": f"Bought {item['name']}", "gems": user.get('gems', 0) - item['cost']}
+
+@api_router.post("/shop/gems/checkout/{package_id}")
+async def buy_gem_package(package_id: str, user: dict = Depends(get_current_user)):
+    db_conn = await require_db()
+    package = next((p for p in GEM_PACKAGES if p['id'] == package_id), None)
+    if not package:
+        raise HTTPException(status_code=404, detail="Gem package not found")
+        
+    await db_conn.users.update_one({'id': user['id']}, {'$inc': {'gems': package['amount']}})
+    return {"message": f"Successfully purchased {package['name']}!", "new_gems": (user.get('gems', 0) + package['amount'])}
+
+@api_router.get("/users/search", response_model=List[LeaderboardEntry])
+async def search_users(q: str, user: dict = Depends(get_current_user)):
+    db_conn = await require_db()
+    if len(q) < 2: return []
+    
+    # Search by name (case insensitive)
+    matched = await db_conn.users.find({
+        'name': {'$regex': q, '$options': 'i'},
+        'id': {'$ne': user['id']}
+    }, {'_id': 0, 'password': 0}).limit(10).to_list(10)
+    
+    result = []
+    for i, u in enumerate(matched):
+        result.append(LeaderboardEntry(
+            rank=0,
+            user_id=u['id'],
+            name=u['name'],
+            xp=u.get('xp', 0),
+            level=u.get('level', 1),
+            streak=u.get('streak', 0),
+            league=u.get('league', 'Bronze')
+        ))
+    return result
 
 # ============ ROOT ROUTES ============
 

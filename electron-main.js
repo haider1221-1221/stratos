@@ -13,6 +13,8 @@ const MAX_WAIT_MS = 60_000;
 
 let backendProcess = null;
 let mainWindow = null;
+let tray = null;
+let isQuitting = false;
 
 const logPath = path.join(app.getPath("userData"), "app.log");
 function log(msg) {
@@ -158,42 +160,100 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
+            preload: path.join(__dirname, "preload.js"), // Added for future expansion
         }
     });
 
-    Menu.setApplicationMenu(null);
-
+    // Handle external links safely
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
         shell.openExternal(url);
         return { action: "deny" };
     });
 
-    mainWindow.on("closed", () => { mainWindow = null; });
+    // Prevent menu from showing (hidden by default, Alt to show in some cases)
+    Menu.setApplicationMenu(null);
+
+    // Modern title bar behavior (optional, keeping default for now but adding tray support)
+    mainWindow.on("close", (event) => {
+        if (!isQuitting) {
+            event.preventDefault();
+            mainWindow.hide();
+        }
+    });
+
+    mainWindow.on("closed", () => {
+        mainWindow = null;
+    });
+}
+
+function createTray() {
+    const iconPath = path.join(__dirname, "stratos.ico");
+    if (!fs.existsSync(iconPath)) return;
+
+    try {
+        const icon = nativeImage.createFromPath(iconPath);
+        tray = new Tray(icon.resize({ width: 16, height: 16 }));
+        const contextMenu = Menu.buildFromTemplate([
+            { label: "Stratos", enabled: false },
+            { type: "separator" },
+            { label: "Show App", click: () => mainWindow.show() },
+            { label: "Settings", click: () => mainWindow.webContents.send("navigate-to", "/profile") },
+            { type: "separator" },
+            { label: "Check for Updates", click: () => { /* Future implementation */ } },
+            {
+                label: "Quit", click: () => {
+                    isQuitting = true;
+                    app.quit();
+                }
+            }
+        ]);
+
+        tray.setToolTip("Stratos – Language Skills Elevated");
+        tray.setContextMenu(contextMenu);
+        tray.on("double-click", () => mainWindow.show());
+    } catch (err) {
+        log(`Failed to create tray: ${err.message}`);
+    }
 }
 
 async function init() {
     log("App starting...");
     startBackend();
     createWindow();
+    createTray();
 
     log("Connecting to backend...");
     try {
         await waitForBackend();
         log("Backend connected. Loading frontend...");
+
+        // Load the backend URL which now serves the frontend
         mainWindow.loadURL(BACKEND_URL);
+
         mainWindow.once("ready-to-show", () => {
             log("Main window ready to show.");
             mainWindow.show();
+
+            if (isDev()) {
+                mainWindow.webContents.openDevTools();
+            }
         });
     } catch (err) {
         log(`Backend connection error: ${err.message}`);
-        dialog.showMessageBoxSync({
+        const choice = dialog.showMessageBoxSync({
             type: 'error',
             title: 'Connection Error',
-            message: 'Could not connect to the Stratos backend. Please check the log file for details.',
-            buttons: ['Quit']
+            message: 'Could not connect to the Stratos backend. Please ensure MongoDB is running and your firewall is not blocking the connection.',
+            buttons: ['Retry', 'Quit'],
+            defaultId: 0
         });
-        app.quit();
+
+        if (choice === 0) {
+            app.relaunch();
+            app.quit();
+        } else {
+            app.quit();
+        }
     }
 }
 

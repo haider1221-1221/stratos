@@ -1,0 +1,301 @@
+import { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import axios from 'axios';
+import { API_URL } from '../lib/api';
+import { toast } from 'sonner';
+import {
+  ArrowLeft, Flame, Zap, Heart, Trophy, Target, Star,
+  Award, Baby, Calendar, Crown, Globe, Sparkles, LogOut, Lock
+} from 'lucide-react';
+
+const ACHIEVEMENT_ICONS = {
+  'baby': Baby,
+  'flame': Flame,
+  'calendar': Calendar,
+  'trophy': Trophy,
+  'zap': Zap,
+  'star': Star,
+  'crown': Crown,
+  'target': Target,
+  'globe': Globe,
+  'sparkles': Sparkles,
+  'award': Award,
+};
+
+const LANGUAGE_META = {
+  es: { flag: '🇪🇸', name: 'Spanish' },
+  fr: { flag: '🇫🇷', name: 'French' },
+  de: { flag: '🇩🇪', name: 'German' },
+  ja: { flag: '🇯🇵', name: 'Japanese' },
+  zh: { flag: '🇨🇳', name: 'Chinese' },
+  it: { flag: '🇮🇹', name: 'Italian' },
+  pt: { flag: '🇧🇷', name: 'Portuguese' },
+  ko: { flag: '🇰🇷', name: 'Korean' },
+  ru: { flag: '🇷🇺', name: 'Russian' },
+  ar: { flag: '🇸🇦', name: 'Arabic' },
+};
+
+const Profile = () => {
+  const { user, logout, refreshUser } = useAuth();
+  const navigate = useNavigate();
+  const [achievements, setAchievements] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchAchievements = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/achievements`);
+        setAchievements(response.data);
+      } catch (error) {
+        console.error('Failed to fetch achievements:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAchievements();
+    refreshUser();
+  }, [refreshUser]);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+    toast.success('Logged out successfully');
+  };
+
+  const unlockedCount = achievements.filter(a => a.unlocked).length;
+  const xpForCurrentLevel = ((user?.level || 1) - 1) * 100;
+  const xpForNextLevel = (user?.level || 1) * 100;
+  const levelProgress = Math.max(0, Math.min(100, ((user?.xp || 0) - xpForCurrentLevel) / (xpForNextLevel - xpForCurrentLevel) * 100));
+
+  // SVG ring
+  const ringRadius = 40;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const ringOffset = ringCircumference - (levelProgress / 100) * ringCircumference;
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <header className="bg-gradient-to-br from-sky-500 via-blue-600 to-indigo-700 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full blur-2xl pointer-events-none" />
+
+        <div className="max-w-4xl mx-auto px-6 pt-6 pb-28 relative">
+          <div className="flex items-center justify-between mb-8">
+            <Link
+              to="/dashboard"
+              className="text-white/70 hover:text-white transition-colors"
+            >
+              <ArrowLeft className="w-6 h-6" />
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="text-white/70 hover:text-white transition-colors flex items-center gap-2 text-sm font-semibold"
+              data-testid="profile-logout-btn"
+            >
+              <LogOut className="w-4 h-4" />
+              Logout
+            </button>
+          </div>
+
+          {/* Profile info */}
+          <div className="text-center">
+            <div className="relative inline-block mb-4">
+              <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center text-sky-600 font-heading font-extrabold text-4xl shadow-2xl ring-4 ring-white/30">
+                {user?.name?.[0]?.toUpperCase() || 'U'}
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-8 h-8 bg-gradient-to-br from-yellow-400 to-amber-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                <Star className="w-4 h-4 text-white fill-white" />
+              </div>
+            </div>
+            <h1 className="font-heading font-extrabold text-3xl text-white mb-1">
+              {user?.name || 'Learner'}
+            </h1>
+            <p className="text-white/60 text-sm">{user?.email}</p>
+            <div className="mt-3 inline-flex items-center gap-1.5 bg-white/15 backdrop-blur-sm rounded-full px-3 py-1 border border-white/20">
+              <Crown className="w-4 h-4 text-yellow-300" />
+              <span className="text-white text-sm font-semibold">Level {user?.level || 1}</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto px-6 -mt-20 pb-12">
+        {/* Key Stats Cards */}
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="bg-gradient-to-br from-orange-400 to-red-500 rounded-3xl p-5 text-center shadow-lg shadow-orange-200">
+            <Flame className="w-7 h-7 text-white mx-auto mb-2" />
+            <div className="font-heading font-extrabold text-3xl text-white">{user?.streak || 0}</div>
+            <div className="text-orange-100 text-xs font-medium">Day Streak</div>
+          </div>
+
+          <div className="bg-gradient-to-br from-yellow-400 to-amber-500 rounded-3xl p-5 text-center shadow-lg shadow-yellow-200">
+            <Zap className="w-7 h-7 text-white mx-auto mb-2" />
+            <div className="font-heading font-extrabold text-3xl text-white">{user?.xp || 0}</div>
+            <div className="text-yellow-100 text-xs font-medium">Total XP</div>
+          </div>
+
+          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl p-5 text-center shadow-lg shadow-indigo-200">
+            <Trophy className="w-7 h-7 text-white mx-auto mb-2" />
+            <div className="font-heading font-extrabold text-3xl text-white">{user?.level || 1}</div>
+            <div className="text-indigo-100 text-xs font-medium">Level</div>
+          </div>
+        </div>
+
+        {/* Level Progress with SVG ring */}
+        <div className="stratos-card mb-6">
+          <div className="flex items-center gap-6">
+            {/* SVG ring */}
+            <div className="relative flex-shrink-0 w-[100px] h-[100px]">
+              <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r={ringRadius} fill="none" stroke="#e2e8f0" strokeWidth="10" />
+                <circle
+                  cx="50" cy="50" r={ringRadius}
+                  fill="none"
+                  stroke="url(#profileLevelGrad)"
+                  strokeWidth="10"
+                  strokeLinecap="round"
+                  strokeDasharray={ringCircumference}
+                  strokeDashoffset={ringOffset}
+                  style={{ transition: 'stroke-dashoffset 0.8s ease' }}
+                />
+                <defs>
+                  <linearGradient id="profileLevelGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#38bdf8" />
+                    <stop offset="100%" stopColor="#6366f1" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="font-heading font-extrabold text-2xl text-slate-800 leading-none">{user?.level || 1}</span>
+                <span className="text-[10px] text-slate-400 font-bold uppercase">Level</span>
+              </div>
+            </div>
+
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-heading font-bold text-lg text-slate-800">Level Progress</h3>
+                <span className="text-sm font-bold text-slate-500">{Math.round(levelProgress)}%</span>
+              </div>
+              <div className="h-3 bg-slate-100 rounded-full overflow-hidden mb-2">
+                <div
+                  className="h-full bg-gradient-to-r from-sky-400 to-indigo-500 rounded-full transition-all"
+                  style={{ width: `${levelProgress}%` }}
+                />
+              </div>
+              <p className="text-sm text-slate-400">
+                <span className="font-bold text-slate-600">{Math.ceil(xpForNextLevel - (user?.xp || 0))} XP</span> until Level {(user?.level || 1) + 1}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Hearts */}
+        <div className="stratos-card bg-gradient-to-br from-red-50 to-pink-50 border-red-100 mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-heading font-bold text-lg text-slate-800 mb-1">Lives</h3>
+              <p className="text-sm text-slate-400">Hearts protect you from mistakes</p>
+            </div>
+            <div className="flex gap-1.5">
+              {[...Array(5)].map((_, i) => (
+                <Heart
+                  key={i}
+                  className={`w-7 h-7 ${i < (user?.hearts || 0) ? 'text-red-500 fill-red-500' : 'text-slate-200 fill-slate-200'}`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Languages Learning */}
+        {user?.languages_learning?.length > 0 && (
+          <div className="stratos-card mb-6">
+            <h3 className="font-heading font-bold text-lg text-slate-800 mb-4">Languages Learning</h3>
+            <div className="flex flex-wrap gap-3">
+              {user.languages_learning.map(code => {
+                const meta = LANGUAGE_META[code] || { flag: '🌍', name: code };
+                return (
+                  <Link
+                    key={code}
+                    to={`/learn/${code}`}
+                    className="flex items-center gap-2 bg-sky-50 hover:bg-sky-100 border-2 border-sky-100 hover:border-sky-300 px-4 py-2.5 rounded-2xl transition-all hover:-translate-y-0.5"
+                  >
+                    <span className="text-2xl">{meta.flag}</span>
+                    <span className="font-bold text-slate-700 text-sm">{meta.name}</span>
+                  </Link>
+                );
+              })}
+              <Link
+                to="/languages"
+                className="flex items-center gap-2 bg-slate-50 hover:bg-slate-100 border-2 border-dashed border-slate-200 px-4 py-2.5 rounded-2xl transition-all text-slate-400 hover:text-slate-600 hover:border-slate-300 text-sm font-semibold"
+              >
+                + Add Language
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {/* Achievements */}
+        <div className="stratos-card mb-6">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="font-heading font-bold text-lg text-slate-800">Achievements</h3>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-indigo-600">{unlockedCount}</span>
+              <span className="text-sm text-slate-400">/ {achievements.length} unlocked</span>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="flex justify-center py-8">
+              <div className="animate-spin w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full"></div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {achievements.map(achievement => {
+                const IconComponent = ACHIEVEMENT_ICONS[achievement.icon] || Award;
+                return (
+                  <div
+                    key={achievement.id}
+                    className={`achievement-badge ${achievement.unlocked ? 'unlocked' : 'locked'} text-center p-4 rounded-2xl border-2 transition-all ${achievement.unlocked
+                        ? 'bg-gradient-to-br from-yellow-50 to-amber-50 border-yellow-200 hover:-translate-y-1 hover:shadow-md cursor-default'
+                        : 'bg-slate-50 border-slate-100 cursor-default'
+                      }`}
+                    data-testid={`achievement-${achievement.id}`}
+                  >
+                    <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3 ${achievement.unlocked
+                        ? 'bg-gradient-to-br from-yellow-400 to-amber-500 shadow-lg shadow-yellow-200'
+                        : 'bg-slate-200'
+                      }`}>
+                      {achievement.unlocked ? (
+                        <IconComponent className="w-7 h-7 text-white" />
+                      ) : (
+                        <Lock className="w-5 h-5 text-slate-400" />
+                      )}
+                    </div>
+                    <h4 className={`font-heading font-bold text-sm leading-tight ${achievement.unlocked ? 'text-slate-800' : 'text-slate-400'
+                      }`}>
+                      {achievement.name}
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">{achievement.description}</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Member since */}
+        <div className="text-center text-slate-400 text-sm">
+          Member since {user?.created_at ? new Date(user.created_at).toLocaleDateString('en-US', {
+            month: 'long',
+            year: 'numeric'
+          }) : 'recently'}
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default Profile;

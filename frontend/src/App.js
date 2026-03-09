@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 
@@ -13,6 +14,8 @@ import LessonPlayer from "./pages/LessonPlayer";
 import Flashcards from "./pages/Flashcards";
 import Leaderboard from "./pages/Leaderboard";
 import Profile from "./pages/Profile";
+import Shop from "./pages/Shop";
+import Friends from "./pages/Friends";
 
 import "./App.css";
 
@@ -55,6 +58,19 @@ const PublicRoute = ({ children }) => {
 };
 
 function AppRoutes() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // Check if running in Electron and listen for navigation events
+    if (window.electron && typeof window.electron.onNavigate === 'function') {
+      const cleanup = window.electron.onNavigate((path) => {
+        console.log(`Navigating to ${path} from Electron Tray`);
+        navigate(path);
+      });
+      return cleanup;
+    }
+  }, [navigate]);
+
   return (
     <Routes>
       {/* Public routes */}
@@ -70,6 +86,8 @@ function AppRoutes() {
       <Route path="/flashcards/:language" element={<ProtectedRoute><Flashcards /></ProtectedRoute>} />
       <Route path="/leaderboard" element={<ProtectedRoute><Leaderboard /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+      <Route path="/shop" element={<ProtectedRoute><Shop /></ProtectedRoute>} />
+      <Route path="/friends" element={<ProtectedRoute><Friends /></ProtectedRoute>} />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
